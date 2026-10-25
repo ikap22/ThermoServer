@@ -1,0 +1,97 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "msft-columbia",
+        "name": "Microsoft Columbia Center",
+        "operator": "Microsoft",
+        "commission_year": 2011,
+        "acreage": 85.4,
+        "estimated_mw": 120
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-119.8595, 47.2385],
+            [-119.8470, 47.2385],
+            [-119.8470, 47.2305],
+            [-119.8595, 47.2305],
+            [-119.8595, 47.2385]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "vantage-quincy",
+        "name": "Vantage Quincy",
+        "operator": "Vantage Data Centers",
+        "commission_year": 2013,
+        "acreage": 68.0,
+        "estimated_mw": 89
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-119.8750, 47.2330],
+            [-119.8630, 47.2330],
+            [-119.8630, 47.2260],
+            [-119.8750, 47.2260],
+            [-119.8750, 47.2330]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "sabey-sdc",
+        "name": "Sabey SDC Quincy",
+        "operator": "Sabey Data Centers",
+        "commission_year": 2011,
+        "acreage": 120.0,
+        "estimated_mw": 180
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-119.8420, 47.2450],
+            [-119.8280, 47.2450],
+            [-119.8280, 47.2360],
+            [-119.8420, 47.2360],
+            [-119.8420, 47.2450]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "h5-quincy",
+        "name": "H5 Data Centers Quincy",
+        "operator": "H5 Data Centers",
+        "commission_year": 2012,
+        "acreage": 63.0,
+        "estimated_mw": 40
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-119.8880, 47.2290],
+            [-119.8760, 47.2290],
+            [-119.8760, 47.2210],
+            [-119.8880, 47.2210],
+            [-119.8880, 47.2290]
+          ]
+        ]
+      }
+    }
+  ]
+}

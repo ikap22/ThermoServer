@@ -1,0 +1,24 @@
+# ThermoServer Project Rules
+
+## Architecture Constraints
+- Zero-cost architecture: do not introduce paid APIs, map tokens, or cloud databases.
+- Data storage: use flat GeoJSON for campus boundaries and SQLite/flat JSON for tabular metrics.
+- Rasters: generate pre-rendered PNG image overlays mapped to bounding coordinates. Do not use dynamic COG tile servers.
+- ML Model: RandomForestRegressor trained strictly on 4 features: distance_meters, campus_acreage, pre_construction_ndvi, and baseline_temp_c.
+- Projections: compute spatial buffers in local UTM (EPSG:32611 - UTM Zone 11N) for accurate meter calculations, then reproject output back to WGS84 (EPSG:4326) for GeoJSON/MapLibre GL.
+
+## Project Scope
+- Target hub: Quincy, WA only. Campuses: msft-columbia, vantage-quincy, sabey-sdc, h5-quincy.
+- Imagery: Landsat 8/9 Collection 2 Level-2 (`landsat-c2-l2`) from Microsoft Planetary Computer, summer window July 1 - August 31.
+- Yearly statistics cover 2015-2026; benchmark overlay years are 2015, 2018, 2021, 2024, 2026.
+- Buffer zones: A core 0-250m, B perimeter 250-1000m, C control 3000-5000m split into C1 unirrigated rangeland and C2 irrigated cropland.
+
+## Paths
+- Campus boundaries: `data/geojson/facilities_quincy.geojson`
+- Clipped rasters (not committed): `data/raw/lst_{year}.tif`, `data/raw/ndvi_{year}.tif`
+- Metrics database: `data/thermal_metrics.db` (table `thermal_metrics`)
+- Map overlays: `data/overlays/quincy_{year}.png`, bounds `[[-119.90,47.26],[-119.80,47.26],[-119.80,47.20],[-119.90,47.20]]`
+- Trained model: `ml/decay_model.joblib`
+
+## Frontend
+- MapLibre GL JS, CartoDB Positron basemap, Tailwind, Chart.js. No API keys.
