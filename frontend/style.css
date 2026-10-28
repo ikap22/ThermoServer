@@ -1,0 +1,113 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  color: #222;
+  background: #f3f3f3;
+}
+
+header {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  background: #fff;
+  border-bottom: 2px solid #222;
+}
+
+header strong { font-size: 18px; }
+
+.draft-tag {
+  border: 1px solid #222;
+  padding: 1px 6px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+header span { color: #555; font-size: 13px; }
+
+#layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: calc(100vh - 48px);
+}
+
+#controls, #drawer {
+  background: #fff;
+  padding: 12px;
+  overflow: auto;
+}
+
+#controls { border-right: 2px solid #222; }
+
+#controls h2, #drawer h2 { margin: 16px 0 6px; font-size: 15px; }
+
+label { display: block; font-size: 14px; margin: 8px 0; }
+
+input[type="range"] { width: 100%; }
+
+.ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #555;
+}
+
+#legend {
+  height: 14px;
+  border: 1px solid #222;
+  background: linear-gradient(to right, #000004, #3b0f70, #8c2981, #de4968, #fe9f6d, #fcfdbf);
+}
+
+.legend-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+button {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid #222;
+  background: #fff;
+  cursor: pointer;
+}
+
+#map { position: relative; height: 100%; }
+
+.chart-box { position: relative; height: 180px; margin-top: 8px; }
+
+#drawer {
+  position: absolute;
+  top: 48px;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  border-left: 2px solid #222;
+  display: none;
+}
+
+#drawer.open { display: block; }
+
+#drawer header {
+  height: auto;
+  border: 0;
+  padding: 0 0 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.muted { color: #555; font-size: 13px; margin: 0 0 8px; }
+
+.stat-box {
+  border: 1px solid #bbb;
+  padding: 8px;
+  margin-top: 8px;
+}
+
+.stat-box p { margin: 4px 0; }
+
+.maplibregl-popup-content { font-family: system-ui, sans-serif; }

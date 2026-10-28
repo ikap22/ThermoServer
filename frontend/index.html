@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ThermoServer draft</title>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+  <header>
+    <strong>ThermoServer</strong>
+    <span class="draft-tag">DRAFT</span>
+    <span>Quincy, WA. Click a campus.</span>
+  </header>
+  <div id="layout">
+    <aside id="controls">
+      <h2>Year</h2>
+      <label>Summer <output id="year-label">2024</output>
+        <input id="year" type="range" min="2015" max="2026" value="2024" step="1">
+      </label>
+      <div class="ticks"><span>2015</span><span>2026</span></div>
+
+      <h2>Ground temperature (°C)</h2>
+      <div id="legend"></div>
+      <div class="legend-labels"><span>30</span><span>45</span><span>60</span></div>
+
+      <h2>Zones</h2>
+      <label><input id="show-a" type="checkbox" checked> Core, 0–250 m</label>
+      <label><input id="show-b" type="checkbox"> Perimeter, 250 m–1 km</label>
+      <label><input id="show-c" type="checkbox"> Control, 3–5 km</label>
+
+      <h2>What-if (draft curve)</h2>
+      <p class="muted">Not the trained model. Acreage changes how far the dashed ring reaches.</p>
+      <label>Added acres <output id="acre-label">75</output>
+        <input id="acres" type="range" min="10" max="200" value="75" step="5">
+      </label>
+      <label>Added MW <output id="mw-label">120</output>
+        <input id="mw" type="range" min="10" max="300" value="120" step="10">
+      </label>
+      <button id="forecast" type="button">Update curve</button>
+      <div class="chart-box"><canvas id="decay"></canvas></div>
+    </aside>
+    <div id="map"></div>
+  </div>
+
+  <aside id="drawer">
+    <header>
+      <div>
+        <h2 id="campus-name">Campus</h2>
+        <p id="campus-meta" class="muted"></p>
+      </div>
+      <button id="close" type="button">Close</button>
+    </header>
+    <p class="muted">Summer ground temperature, 2015–2026.</p>
+    <div class="chart-box"><canvas id="history"></canvas></div>
+    <div class="stat-box">
+      <p id="campus-gap"></p>
+      <p>Grant County PUD: data centers use about 37% of county electricity. About 85% of that power is hydro from Wanapum and Priest Rapids.</p>
+    </div>
+  </aside>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
