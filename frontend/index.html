@@ -2,65 +2,136 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>ThermoServer draft</title>
+  <title>ThermoServer</title>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
   <link href="style.css" rel="stylesheet">
 </head>
 <body>
-  <header>
-    <strong>ThermoServer</strong>
-    <span class="draft-tag">DRAFT</span>
-    <span>Quincy, WA. Click a campus.</span>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a5 5 0 0 1 5 5v6.1a5 5 0 1 1-10 0V7a5 5 0 0 1 5-5zm0 2a3 3 0 0 0-3 3v6.1a3 3 0 1 0 6 0V7a3 3 0 0 0-3-3z"/></svg>
+      ThermoServer
+    </div>
   </header>
-  <div id="layout">
-    <aside id="controls">
-      <h2>Year</h2>
-      <label>Summer <output id="year-label">2024</output>
-        <input id="year" type="range" min="2015" max="2026" value="2024" step="1">
-      </label>
-      <div class="ticks"><span>2015</span><span>2026</span></div>
 
-      <h2>Ground temperature (°C)</h2>
-      <div id="legend"></div>
-      <div class="legend-labels"><span>30</span><span>45</span><span>60</span></div>
+  <div id="map"></div>
 
-      <h2>Zones</h2>
-      <label><input id="show-a" type="checkbox" checked> Core, 0–250 m</label>
-      <label><input id="show-b" type="checkbox"> Perimeter, 250 m–1 km</label>
-      <label><input id="show-c" type="checkbox"> Control, 3–5 km</label>
+  <aside id="controls" class="card">
+    <h1>ThermoServer</h1>
+    <p class="subtitle">Data Center Thermal &amp; Land-Cover Observatory</p>
 
-      <h2>What-if (draft curve)</h2>
-      <p class="muted">Not the trained model. Acreage changes how far the dashed ring reaches.</p>
-      <label>Added acres <output id="acre-label">75</output>
-        <input id="acres" type="range" min="10" max="200" value="75" step="5">
-      </label>
-      <label>Added MW <output id="mw-label">120</output>
-        <input id="mw" type="range" min="10" max="300" value="120" step="10">
-      </label>
-      <button id="forecast" type="button">Update curve</button>
-      <div class="chart-box"><canvas id="decay"></canvas></div>
-    </aside>
-    <div id="map"></div>
-  </div>
+    <h2>Year Selection <output id="year-label">2024</output></h2>
+    <input id="year" type="range" min="2008" max="2026" value="2024" step="1">
+    <div class="ticks"><span>2008</span><span>2011</span><span>2015</span><span>2020</span><span>2026</span></div>
+    <p class="fine">2008–2011 are Landsat 5. 2012 is Landsat 7, which leaves some gaps. From 2013 on the scenes are Landsat 8/9.</p>
+
+    <h2>°C above irrigated cropland</h2>
+    <div id="legend"></div>
+    <div class="ticks"><span>4</span><span>8</span><span>12</span><span>16</span></div>
+    <p class="fine">Irrigated fields are watered all summer, so they stay near 34°C. Roofs and pavement are not. The number is that difference: the size of the campus heat island that summer. The glow is the measured ground temperature spreading out from the buildings. 2008–10 is before these campuses opened.</p>
+
+    <h2 id="rise-title">Rise since 2008–10</h2>
+    <div class="rise-row rise-head"><span></span><span>2024–26</span><span>rise</span></div>
+    <div id="rise-list"></div>
+
+    <h2>Zone boundaries</h2>
+    <p class="fine">Each switch draws that ring and fills it with the summer heat map. The glow around the buildings stays on either way.</p>
+    <label class="switch-row">250 m around the buildings
+      <span class="switch-wrap"><input id="show-a" type="checkbox"><span class="switch"></span></span>
+    </label>
+    <label class="switch-row">1 km neighborhood
+      <span class="switch-wrap"><input id="show-b" type="checkbox"><span class="switch"></span></span>
+    </label>
+    <label class="switch-row">Fields used as the baseline, 3–5 km
+      <span class="switch-wrap"><input id="show-c" type="checkbox"><span class="switch"></span></span>
+    </label>
+
+    <h2>Scenario Simulation*</h2>
+    <div class="sim-row">
+      <span>Acreage Expansion <strong id="acre-label">75 acres</strong></span>
+      <button id="forecast-acres" type="button">Forecast</button>
+    </div>
+    <input id="acres" type="range" min="10" max="200" value="75" step="5">
+    <div class="sim-row">
+      <span>Projected Power <strong id="mw-label">120 MW</strong></span>
+      <button id="forecast-mw" type="button">Forecast</button>
+    </div>
+    <input id="mw" type="range" min="10" max="300" value="120" step="10">
+
+    <div id="forecast-panel">
+      <p id="forecast-summary"></p>
+      <div class="chart-box short"><canvas id="decay"></canvas></div>
+      <p class="fine">* Simulated distance decay. The regression model is not trained yet.</p>
+    </div>
+  </aside>
+
+  <aside id="pud" class="card">
+    <div class="pud-head">
+      <div>
+        <strong>Quincy, WA</strong>
+        <div class="fine">Ground Context &amp; Metrics</div>
+      </div>
+    </div>
+    <div class="pud-body">
+      <div>
+        <div class="fine">Mean °C above irrigated cropland</div>
+        <svg id="spark" viewBox="0 0 220 64"></svg>
+        <div id="spark-caption" class="fine"></div>
+        <div class="ticks"><span>2008</span><span>2016</span><span>2026</span></div>
+      </div>
+      <div class="pud-stat">
+        <div class="fine">Grant County PUD</div>
+        <div>37% of county load*</div>
+        <div>~85% hydro*</div>
+        <div class="fine">* Not from the Landsat zones.</div>
+      </div>
+    </div>
+  </aside>
 
   <aside id="drawer">
     <header>
       <div>
-        <h2 id="campus-name">Campus</h2>
-        <p id="campus-meta" class="muted"></p>
+        <div class="eyebrow">Campus Analytics &amp; Metrics</div>
       </div>
       <button id="close" type="button">Close</button>
     </header>
-    <p class="muted">Summer ground temperature, 2015–2026.</p>
+    <h2 id="campus-name">Campus</h2>
+    <p id="campus-meta" class="fine"></p>
+    <div class="compare" id="compare">
+      <div><strong id="early-gap">—</strong><span id="early-label">above fields, 2008–10</span></div>
+      <div><strong id="late-gap">—</strong><span>above fields, 2024–26</span></div>
+      <div class="up"><strong id="change-gap">—</strong><span>that gap grew by</span></div>
+    </div>
+    <p class="chart-title">Each summer, core minus irrigated cropland</p>
     <div class="chart-box"><canvas id="history"></canvas></div>
-    <div class="stat-box">
-      <p id="campus-gap"></p>
-      <p>Grant County PUD: data centers use about 37% of county electricity. About 85% of that power is hydro from Wanapum and Priest Rapids.</p>
+
+    <div class="stat-grid">
+      <div class="stat">
+        <h3>Acreage &amp; Zones</h3>
+        <p>Total acreage: <strong id="stat-acres"></strong></p>
+        <p id="stat-zone"></p>
+      </div>
+      <div class="stat">
+        <h3>Utility &amp; Power</h3>
+        <p>Estimated power: <strong id="stat-mw"></strong>*</p>
+        <p>37% of county load* · ~85% hydro*</p>
+      </div>
+      <div class="stat">
+        <h3>Historical divergence</h3>
+        <p id="stat-crop"></p>
+        <p id="stat-range"></p>
+      </div>
+      <div class="stat">
+        <h3>Grant County PUD</h3>
+        <p>37% utility load share*</p>
+        <p>~85% hydro from Wanapum and Priest Rapids*</p>
+        <p class="fine">* Not measured from the Landsat zones.</p>
+      </div>
     </div>
   </aside>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=2008b"></script>
 </body>
 </html>

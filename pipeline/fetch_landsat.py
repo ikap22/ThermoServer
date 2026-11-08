@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Fetch summer Landsat 8/9 medians over Quincy, WA.
+"""Fetch summer Landsat medians over Quincy, WA.
 
 For each year, keeps the clearest June 15–August 31 scenes that fully cover
 the analysis box, masks cloud and shadow, and writes the median surface
-temperature and NDVI. `--year all` also builds the status-report contact sheet.
+temperature and NDVI. 2008–2011 use Landsat 5. 2012 is Landsat 7, because
+Landsat 5 had stopped. 2013–2026 use Landsat 8/9. `--year all` also builds
+the status-report contact sheet.
 
 Writes:
   data/raw/lst_{year}.tif
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import time
 import warnings
@@ -54,7 +57,7 @@ STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 COLLECTION = "landsat-c2-l2"
 MAX_CLOUD_COVER = 10
 MAX_SCENES = 4
-YEARS = range(2015, 2027)
+YEARS = range(2008, 2027)
 
 ANALYSIS_BBOX = (-119.97, 47.16, -119.74, 47.30)
 OVERLAY_BBOX = (-119.90, 47.20, -119.80, 47.26)
@@ -65,24 +68,46 @@ KELVIN = 273.15
 QA_CLOUD_MASK = (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4)
 
 
+def thermal_asset(item: Item) -> str:
+    """Landsat 8/9 surface temperature is lwir11. Landsat 5/7 use lwir."""
+    if "lwir11" in item.assets:
+        return "lwir11"
+    return "lwir"
+
+
 def find_scenes(catalog: pystac_client.Client, year: int) -> list[Item]:
-    """Clearest summer scenes that fully cover the Quincy analysis box."""
+    """Clearest summer scenes that fully cover the Quincy analysis box.
+
+    One satellite per year, so the median is not a mix of 30 m and striped data.
+    Landsat 5 before 2013, Landsat 7 only when Landsat 5 has no scene, Landsat 8/9 after.
+    """
+    platforms = ["landsat-8", "landsat-9"] if year >= 2013 else ["landsat-5", "landsat-7"]
     search = catalog.search(
         collections=[COLLECTION],
         bbox=ANALYSIS_BBOX,
         datetime=f"{year}-06-15/{year}-08-31",
         query={
             "eo:cloud_cover": {"lt": MAX_CLOUD_COVER},
-            "platform": {"in": ["landsat-8", "landsat-9"]},
+            "platform": {"in": platforms},
         },
     )
     aoi = box(*ANALYSIS_BBOX)
     items = [item for item in search.items() if shape(item.geometry).contains(aoi)]
     items.sort(key=lambda item: (item.properties["eo:cloud_cover"], str(item.datetime)))
-    if not items:
+    if year >= 2013:
+        pool, limit = items, MAX_SCENES
+    else:
+        landsat5 = [item for item in items if item.properties["platform"] == "landsat-5"]
+        if landsat5:
+            pool, limit = landsat5, MAX_SCENES
+        else:
+            pool = [item for item in items if item.properties["platform"] == "landsat-7"]
+            limit = 6
+            print(f"{year}: no Landsat 5 scene, using Landsat 7 (scan-line gaps)", flush=True)
+    if not pool:
         raise RuntimeError(f"No summer {year} scenes fully cover the Quincy analysis area.")
-    chosen = items[:MAX_SCENES]
-    print(f"{year}: {len(items)} clear scenes, using {len(chosen)}", flush=True)
+    chosen = pool[:limit]
+    print(f"{year}: {len(pool)} clear scenes, using {len(chosen)}", flush=True)
     for item in chosen:
         print(
             f"  {item.id}  {item.datetime.date()}  "
@@ -128,7 +153,7 @@ def on_grid(item: Item, asset: str, grid: dict, fill: int, nodata: int | None) -
 
 
 def reference_grid(item: Item) -> dict:
-    with rasterio.open(item.assets["lwir11"].href) as src:
+    with rasterio.open(item.assets[thermal_asset(item)].href) as src:
         crs = src.crs
         bbox_crs = transform_bounds("EPSG:4326", crs, *ANALYSIS_BBOX)
         window = from_bounds(*bbox_crs, transform=src.transform)
@@ -142,7 +167,7 @@ def reference_grid(item: Item) -> dict:
 
 
 def scene_arrays(item: Item, grid: dict) -> tuple[np.ndarray, np.ndarray]:
-    st = on_grid(item, "lwir11", grid, fill=0, nodata=0)
+    st = on_grid(item, thermal_asset(item), grid, fill=0, nodata=0)
     red = on_grid(item, "red", grid, fill=0, nodata=0)
     nir = on_grid(item, "nir08", grid, fill=0, nodata=0)
     qa = on_grid(item, "qa_pixel", grid, fill=QA_CLOUD_MASK, nodata=None)
@@ -264,10 +289,16 @@ def fetch_year(catalog: pystac_client.Client, year: int, force: bool) -> dict:
 
 
 def write_contact_sheet(records: list[dict]) -> None:
-    fig, axes = plt.subplots(3, 4, figsize=(16, 11))
+    years = list(YEARS)
+    cols = 5
+    rows = math.ceil(len(years) / cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(16, 3.2 * rows))
     by_year = {record["year"]: record for record in records}
     image = None
-    for ax, year in zip(axes.ravel(), YEARS):
+    panels = list(axes.ravel())
+    for ax in panels[len(years):]:
+        ax.axis("off")
+    for ax, year in zip(panels, years):
         path = RAW_DIR / f"lst_{year}.tif"
         record = by_year.get(year)
         if not path.exists():
@@ -283,7 +314,7 @@ def write_contact_sheet(records: list[dict]) -> None:
         ax.axis("off")
     if image is not None:
         fig.colorbar(image, ax=axes.ravel().tolist(), label="Land Surface Temperature (°C)", shrink=0.85)
-    fig.suptitle("Quincy summer median LST, 2015–2026", fontsize=14)
+    fig.suptitle("Quincy summer median LST, 2008–2026", fontsize=14)
     out = OVERLAY_DIR / "yearly_contact_sheet.png"
     fig.savefig(out, dpi=140, bbox_inches="tight")
     plt.close(fig)
@@ -320,7 +351,7 @@ def load_records() -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--year", default="2024", help="A year, or 'all' for 2015-2026")
+    parser.add_argument("--year", default="2024", help="A year, or 'all' for 2008-2026")
     parser.add_argument("--force", action="store_true", help="Redo years that were already fetched")
     args = parser.parse_args()
 

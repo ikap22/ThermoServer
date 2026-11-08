@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the draft map images and the numbers the page charts.
 
-Writes data/overlays/quincy_{year}.png for 2015-2026, cropped to the
+Writes data/overlays/quincy_{year}.png for 2008-2026, cropped to the
 MapLibre overlay box, and frontend/metrics.json with zone temperatures.
 """
 
@@ -14,8 +14,11 @@ import numpy as np
 import rasterio
 from matplotlib import colormaps
 from PIL import Image
+from scipy.ndimage import distance_transform_edt, gaussian_filter
 from rasterio.features import geometry_mask
+from rasterio.warp import transform as warp_transform
 from rasterio.warp import transform_bounds
+from shapely.ops import unary_union
 from rasterio.windows import Window, from_bounds
 
 import geopandas as gpd
@@ -26,10 +29,15 @@ OVERLAYS = ROOT / "data" / "overlays"
 FACILITIES = ROOT / "data" / "geojson" / "facilities_quincy.geojson"
 ZONES = ROOT / "data" / "geojson" / "zones_quincy.geojson"
 METRICS = ROOT / "frontend" / "metrics.json"
+CLIPPED = OVERLAYS / "clipped"
+BOUNDS = ROOT / "frontend" / "overlay_bounds.json"
 
 OVERLAY_BBOX = (-119.90, 47.20, -119.80, 47.26)  # west, south, east, north
 VMIN, VMAX = 30.0, 60.0
-YEARS = range(2015, 2027)
+# Color the map as degrees above irrigated cropland, not raw °C.
+# A 30–60 scale hides a 4°C rise; 4–16 makes that rise change color.
+ANOM_MIN, ANOM_MAX = 4.0, 16.0
+YEARS = range(2008, 2027)
 # Inside the valley control ring: low greenness vs irrigated fields.
 NDVI_RANGELAND = 0.30
 NDVI_CROPLAND = 0.50
@@ -53,6 +61,87 @@ def write_png(year: int) -> None:
     out = OVERLAYS / f"quincy_{year}.png"
     image.save(out)
     print(f"  {out.name} {image.size[0]}x{image.size[1]}")
+
+
+def radiating(data: np.ndarray, footprints, baseline: float, transform) -> Image.Image:
+    """Real ground temperature, fading with distance from the buildings.
+
+    The building edge is not a wall. Hotter ground stays bright and cooler
+    ground drops out, so the campus reads as a glow instead of a cut-out.
+    The glow dissolves by 2 km. Zone rings are drawn separately on the map.
+    """
+    valid = np.isfinite(data)
+    filled = np.where(valid, data, baseline)
+    smooth = gaussian_filter(filled.astype(np.float64), sigma=1.15)
+    anomaly = smooth - baseline
+    foot = ~geometry_mask([footprints], out_shape=data.shape, transform=transform, all_touched=True)
+    dist_m = distance_transform_edt(~foot) * abs(transform.a)
+    radius, feather = 2000.0, 700.0
+    fade = np.clip((radius - dist_m) / feather, 0.0, 1.0)
+    glow = np.clip((anomaly - 2.0) / 10.0, 0.0, 1.0)
+    scaled = np.clip((anomaly - ANOM_MIN) / (ANOM_MAX - ANOM_MIN), 0.0, 1.0)
+    rgba = colormaps["inferno"](scaled)
+    visible = valid & (dist_m <= radius) & (glow > 0.02)
+    rgba[..., 3] = np.where(visible, fade * (0.28 + 0.67 * glow), 0.0)
+    return Image.fromarray((rgba * 255).astype(np.uint8), mode="RGBA")
+
+
+def colorize(data: np.ndarray, inside: np.ndarray, baseline: float) -> Image.Image:
+    anomaly = data - baseline
+    scaled = np.clip((anomaly - ANOM_MIN) / (ANOM_MAX - ANOM_MIN), 0, 1)
+    rgba = colormaps["inferno"](np.where(np.isfinite(data), scaled, 0))
+    rgba[..., 3] = np.where(inside & np.isfinite(data), 0.92, 0.0)
+    return Image.fromarray((rgba * 255).astype(np.uint8), mode="RGBA")
+
+
+def image_corners(transform, width: int, height: int, crs) -> list[list[float]]:
+    left, top = transform * (0, 0)
+    right, bottom = transform * (width, height)
+    xs, ys = warp_transform(crs, "EPSG:4326", [left, right, right, left], [top, top, bottom, bottom])
+    return [[round(xs[i], 6), round(ys[i], 6)] for i in range(4)]
+
+
+def zone_parts(facilities: gpd.GeoDataFrame, zones: gpd.GeoDataFrame, crs) -> dict:
+    """Building footprints, then the part of each ring outside the buildings."""
+    footprints = unary_union(facilities.to_crs(crs).geometry)
+    projected = zones.to_crs(crs)
+    core = unary_union(projected.loc[projected["zone_type"] == "A_core", "geometry"])
+    return {
+        "foot": footprints,
+        "a": core.difference(footprints),
+        "b": unary_union(projected.loc[projected["zone_type"] == "B_perimeter", "geometry"]),
+        "c": unary_union(projected.loc[projected["zone_type"] == "C_control", "geometry"]),
+    }
+
+
+def write_clipped() -> None:
+    """Heat images with transparent pixels outside each zone."""
+    CLIPPED.mkdir(parents=True, exist_ok=True)
+    facilities = gpd.read_file(FACILITIES)
+    zones = gpd.read_file(ZONES)
+    bounds = {}
+    for year in YEARS:
+        with rasterio.open(RAW / f"lst_{year}.tif") as src:
+            data = src.read(1)
+            cropland = [
+                row["C2_cropland"]
+                for row in zone_means(year, facilities, zones).values()
+                if row.get("C2_cropland") is not None
+            ]
+            baseline = float(np.mean(cropland))
+            footprints = unary_union(facilities.to_crs(src.crs).geometry)
+            radiating(data, footprints, baseline, src.transform).save(CLIPPED / f"quincy_{year}_field.png")
+            parts = zone_parts(facilities, zones, src.crs)
+            for name, geom in parts.items():
+                if geom.is_empty:
+                    inside = np.zeros(data.shape, dtype=bool)
+                else:
+                    inside = ~geometry_mask([geom], out_shape=data.shape, transform=src.transform)
+                colorize(data, inside, baseline).save(CLIPPED / f"quincy_{year}_{name}.png")
+            print(f"  {year}: cropland baseline {baseline:.1f} °C")
+            bounds[str(year)] = image_corners(src.transform, src.width, src.height, src.crs)
+    BOUNDS.write_text(json.dumps(bounds, indent=2))
+    print(f"Saved {BOUNDS.relative_to(ROOT)}")
 
 
 def zone_means(year: int, facilities: gpd.GeoDataFrame, zones: gpd.GeoDataFrame) -> dict:
@@ -106,9 +195,8 @@ def write_metrics() -> None:
 
 def main() -> None:
     OVERLAYS.mkdir(parents=True, exist_ok=True)
-    print("Overlay images")
-    for year in YEARS:
-        write_png(year)
+    print("Clipped zone images")
+    write_clipped()
     print("Chart numbers")
     write_metrics()
 
