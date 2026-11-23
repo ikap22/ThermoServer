@@ -14,7 +14,6 @@ import numpy as np
 import rasterio
 from matplotlib import colormaps
 from PIL import Image
-from scipy.ndimage import distance_transform_edt, gaussian_filter
 from rasterio.features import geometry_mask
 from rasterio.warp import transform as warp_transform
 from rasterio.warp import transform_bounds
@@ -63,35 +62,36 @@ def write_png(year: int) -> None:
     print(f"  {out.name} {image.size[0]}x{image.size[1]}")
 
 
-def radiating(data: np.ndarray, footprints, baseline: float, transform) -> Image.Image:
-    """Real ground temperature, fading with distance from the buildings.
+# Degrees above that summer's irrigated cropland. Fixed cuts so the legend
+# means the same thing in every year.
+CLASS_EDGES = (0.0, 4.0, 8.0, 12.0)
+CLASS_RGBA = np.array(
+    [
+        [33, 102, 172, 235],
+        [146, 197, 222, 235],
+        [254, 224, 139, 235],
+        [244, 109, 67, 235],
+        [165, 0, 38, 235],
+    ],
+    dtype=np.uint8,
+)
+VALLEY_NORTH = 47.26
+BLOCK = 4
 
-    The building edge is not a wall. Hotter ground stays bright and cooler
-    ground drops out, so the campus reads as a glow instead of a cut-out.
-    The glow dissolves by 2 km. Zone rings are drawn separately on the map.
-    """
-    valid = np.isfinite(data)
-    filled = np.where(valid, data, baseline)
-    smooth = gaussian_filter(filled.astype(np.float64), sigma=1.15)
-    anomaly = smooth - baseline
-    foot = ~geometry_mask([footprints], out_shape=data.shape, transform=transform, all_touched=True)
-    dist_m = distance_transform_edt(~foot) * abs(transform.a)
-    radius, feather = 2000.0, 700.0
-    fade = np.clip((radius - dist_m) / feather, 0.0, 1.0)
-    glow = np.clip((anomaly - 2.0) / 10.0, 0.0, 1.0)
-    scaled = np.clip((anomaly - ANOM_MIN) / (ANOM_MAX - ANOM_MIN), 0.0, 1.0)
-    rgba = colormaps["inferno"](scaled)
-    visible = valid & (dist_m <= radius) & (glow > 0.02)
-    rgba[..., 3] = np.where(visible, fade * (0.28 + 0.67 * glow), 0.0)
-    return Image.fromarray((rgba * 255).astype(np.uint8), mode="RGBA")
+
+def class_image(data: np.ndarray, baseline: float, inside: np.ndarray) -> Image.Image:
+    """Five distinct colors, from cooler than the fields to much hotter."""
+    anomaly = data - baseline
+    classes = np.digitize(anomaly, CLASS_EDGES)
+    rgba = np.zeros((*data.shape, 4), dtype=np.uint8)
+    visible = inside & np.isfinite(data)
+    for index, color in enumerate(CLASS_RGBA):
+        rgba[(classes == index) & visible] = color
+    return Image.fromarray(rgba, mode="RGBA")
 
 
 def colorize(data: np.ndarray, inside: np.ndarray, baseline: float) -> Image.Image:
-    anomaly = data - baseline
-    scaled = np.clip((anomaly - ANOM_MIN) / (ANOM_MAX - ANOM_MIN), 0, 1)
-    rgba = colormaps["inferno"](np.where(np.isfinite(data), scaled, 0))
-    rgba[..., 3] = np.where(inside & np.isfinite(data), 0.92, 0.0)
-    return Image.fromarray((rgba * 255).astype(np.uint8), mode="RGBA")
+    return class_image(data, baseline, inside)
 
 
 def image_corners(transform, width: int, height: int, crs) -> list[list[float]]:
@@ -129,8 +129,9 @@ def write_clipped() -> None:
                 if row.get("C2_cropland") is not None
             ]
             baseline = float(np.mean(cropland))
-            footprints = unary_union(facilities.to_crs(src.crs).geometry)
-            radiating(data, footprints, baseline, src.transform).save(CLIPPED / f"quincy_{year}_field.png")
+            lat = latitudes(src.transform, src.crs, data.shape)
+            valley = np.isfinite(data) & (lat < VALLEY_NORTH)
+            class_image(data, baseline, valley).save(CLIPPED / f"quincy_{year}_field.png")
             parts = zone_parts(facilities, zones, src.crs)
             for name, geom in parts.items():
                 if geom.is_empty:
@@ -191,6 +192,141 @@ def write_metrics() -> None:
         print(f"  {campus['id']}: 2024 core {core} °C, cropland {crop} °C")
     METRICS.write_text(json.dumps(payload, indent=2))
     print(f"Saved {METRICS.relative_to(ROOT)}")
+
+
+def latitudes(transform, crs, shape) -> np.ndarray:
+    rows, cols = np.indices(shape)
+    xs, ys = rasterio.transform.xy(transform, rows, cols, offset="center")
+    _, lats = warp_transform(crs, "EPSG:4326", np.ravel(xs), np.ravel(ys))
+    return np.reshape(lats, shape)
+
+
+def cropland_baseline(year: int) -> float:
+    metrics = json.loads(METRICS.read_text())
+    index = metrics["years"].index(year)
+    values = [
+        facility["series"]["C2_cropland"][index]
+        for facility in metrics["facilities"].values()
+    ]
+    return float(np.mean(values))
+
+
+def block_mean(values: np.ndarray, valid: np.ndarray, factor: int):
+    height, width = values.shape
+    height2, width2 = height - height % factor, width - width % factor
+    blocked = values[:height2, :width2].reshape(height2 // factor, factor, width2 // factor, factor)
+    mask = valid[:height2, :width2].reshape(height2 // factor, factor, width2 // factor, factor)
+    count = mask.sum(axis=(1, 3))
+    total = np.where(mask, blocked, 0).sum(axis=(1, 3))
+    coarse = np.divide(total, np.maximum(count, 1))
+    return coarse, count >= (factor * factor) // 2
+
+
+def rook_sum(values: np.ndarray, valid: np.ndarray):
+    filled = np.where(valid, values, 0.0)
+    total = np.zeros(values.shape, dtype=np.float64)
+    count = np.zeros(values.shape, dtype=np.float64)
+    total[:-1, :] += filled[1:, :]
+    count[:-1, :] += valid[1:, :]
+    total[1:, :] += filled[:-1, :]
+    count[1:, :] += valid[:-1, :]
+    total[:, :-1] += filled[:, 1:]
+    count[:, :-1] += valid[:, 1:]
+    total[:, 1:] += filled[:, :-1]
+    count[:, 1:] += valid[:, :-1]
+    return total, count
+
+
+def morans_i(values: np.ndarray, valid: np.ndarray) -> float:
+    if int(valid.sum()) < 10:
+        return 0.0
+    centered = np.where(valid, values - values[valid].mean(), 0.0)
+    total, count = rook_sum(centered, valid)
+    weight = float(count[valid].sum())
+    variance = float(np.sum(centered[valid] ** 2))
+    if weight == 0 or variance == 0:
+        return 0.0
+    return float(valid.sum() / weight * np.sum(centered[valid] * total[valid]) / variance)
+
+
+def cluster_labels(values: np.ndarray, valid: np.ndarray, baseline: float):
+    """Like-with-like patches at the two ends of the temperature classes."""
+    anomaly = np.where(valid, values - baseline, 0.0)
+    total, count = rook_sum(anomaly, valid)
+    lag = np.divide(total, count, out=np.zeros_like(total), where=count >= 3)
+    hot = valid & (anomaly >= 12.0) & (lag >= 12.0)
+    cool = valid & (anomaly <= -2.0) & (lag <= -2.0)
+    return hot, cool
+
+
+def moran_test(values: np.ndarray, valid: np.ndarray, observed: float) -> float:
+    rng = np.random.default_rng(21)
+    flat = values[valid].copy()
+    as_high = 0
+    for _ in range(199):
+        rng.shuffle(flat)
+        trial = np.zeros_like(values)
+        trial[valid] = flat
+        if morans_i(trial, valid) >= observed:
+            as_high += 1
+    return (1 + as_high) / 200
+
+
+def write_classes() -> None:
+    """Classified valley map, plus Moran's I and the hot/cool cluster overlay."""
+    CLIPPED.mkdir(parents=True, exist_ok=True)
+    facilities = gpd.read_file(FACILITIES)
+    zones = gpd.read_file(ZONES)
+    summary = {}
+    for year in YEARS:
+        with rasterio.open(RAW / f"lst_{year}.tif") as src:
+            data = src.read(1).astype(np.float32)
+            transform, crs = src.transform, src.crs
+        baseline = cropland_baseline(year)
+        lat = latitudes(transform, crs, data.shape)
+        valley = np.isfinite(data) & (lat < VALLEY_NORTH)
+        class_image(data, baseline, valley).save(CLIPPED / f"quincy_{year}_field.png")
+        for name, geom in zone_parts(facilities, zones, crs).items():
+            if geom.is_empty:
+                inside = np.zeros(data.shape, dtype=bool)
+            else:
+                inside = ~geometry_mask([geom], out_shape=data.shape, transform=transform)
+            class_image(data, baseline, inside & valley).save(CLIPPED / f"quincy_{year}_{name}.png")
+
+        coarse, coarse_valid = block_mean(data, valley, BLOCK)
+        observed = morans_i(coarse, coarse_valid)
+        p_value = moran_test(coarse, coarse_valid, observed)
+        hot, cool = cluster_labels(coarse, coarse_valid, baseline)
+        hot_full = np.zeros(data.shape, dtype=bool)
+        cool_full = np.zeros(data.shape, dtype=bool)
+        hot_paint = np.repeat(np.repeat(hot, BLOCK, axis=0), BLOCK, axis=1)
+        cool_paint = np.repeat(np.repeat(cool, BLOCK, axis=0), BLOCK, axis=1)
+        hot_full[: hot_paint.shape[0], : hot_paint.shape[1]] = hot_paint
+        cool_full[: cool_paint.shape[0], : cool_paint.shape[1]] = cool_paint
+        hot_full &= valley
+        cool_full &= valley
+        rgba = np.zeros((*data.shape, 4), dtype=np.uint8)
+        rgba[cool_full] = (33, 102, 172, 210)
+        rgba[hot_full] = (165, 0, 38, 210)
+        Image.fromarray(rgba, mode="RGBA").save(CLIPPED / f"quincy_{year}_cluster.png")
+
+        n_valley = int(valley.sum())
+        summary[str(year)] = {
+            "morans_i": round(observed, 2),
+            "p_value": round(p_value, 3),
+            "n_blocks": int(coarse_valid.sum()),
+            "block_m": int(round(abs(transform.a) * BLOCK)),
+            "hot_cluster_pct": round(float(hot_full.sum()) / n_valley * 100, 1),
+            "cool_cluster_pct": round(float(cool_full.sum()) / n_valley * 100, 1),
+            "baseline_c": round(baseline, 1),
+        }
+        print(
+            f"  {year}: I={observed:.2f} p={p_value:.3f}  "
+            f"hot {summary[str(year)]['hot_cluster_pct']}%  cool {summary[str(year)]['cool_cluster_pct']}%"
+        )
+    path = ROOT / "frontend" / "spatial.json"
+    path.write_text(json.dumps(summary, indent=2))
+    print(f"Saved {path.relative_to(ROOT)}")
 
 
 def main() -> None:

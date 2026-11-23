@@ -23,19 +23,36 @@
     <h2>Year Selection <output id="year-label">2024</output></h2>
     <input id="year" type="range" min="2008" max="2026" value="2024" step="1">
     <div class="ticks"><span>2008</span><span>2011</span><span>2015</span><span>2020</span><span>2026</span></div>
-    <p class="fine">2008–2011 are Landsat 5. 2012 is Landsat 7, which leaves some gaps. From 2013 on the scenes are Landsat 8/9.</p>
+    <div class="jump-row">
+      <button id="jump-2008" type="button">2008, before</button>
+      <button id="jump-2024" type="button">2024, after</button>
+    </div>
+    <p class="fine">These two summers are the comparison. The map moves to Vantage, the campus whose gap over the fields grew after it opened. Microsoft’s parcel was already hot in 2008.</p>
+    <p class="fine">2008–2011 are Landsat 5 (120 m thermal pixels). 2012 is Landsat 7, which leaves some gaps. From 2013 on the scenes are Landsat 8/9.</p>
 
-    <h2>°C above irrigated cropland</h2>
-    <div id="legend"></div>
-    <div class="ticks"><span>4</span><span>8</span><span>12</span><span>16</span></div>
-    <p class="fine">Irrigated fields are watered all summer, so they stay near 34°C. Roofs and pavement are not. The number is that difference: the size of the campus heat island that summer. The glow is the measured ground temperature spreading out from the buildings. 2008–10 is before these campuses opened.</p>
+    <h2>Temperature classes</h2>
+    <p class="fine">Each color is how much hotter the ground is than irrigated cropland that same summer. Blue is cooler than those fields. Red is much hotter. The bare hills north of 47.26°N are left off the map.</p>
+    <ul class="class-key">
+      <li><i style="background:#2166AC"></i>Cooler than the fields</li>
+      <li><i style="background:#92C5DE"></i>Within 4°C of the fields</li>
+      <li><i style="background:#FEE08B"></i>4–8°C warmer</li>
+      <li><i style="background:#F46D43"></i>8–12°C hotter</li>
+      <li><i style="background:#A50026"></i>More than 12°C hotter</li>
+    </ul>
+
+    <h2>Spatial autocorrelation</h2>
+    <p class="fine">Moran’s I asks whether neighboring ground has similar temperatures. Near 0 would be a random mix. A high value means heat and cool fields form patches.</p>
+    <label class="switch-row">Show hot and cool clusters
+      <span class="switch-wrap"><input id="show-cluster" type="checkbox"><span class="switch"></span></span>
+    </label>
+    <p id="spatial-readout" class="fine"></p>
 
     <h2 id="rise-title">Rise since 2008–10</h2>
     <div class="rise-row rise-head"><span></span><span>2024–26</span><span>rise</span></div>
     <div id="rise-list"></div>
 
     <h2>Zone boundaries</h2>
-    <p class="fine">Each switch draws that ring and fills it with the summer heat map. The glow around the buildings stays on either way.</p>
+    <p class="fine">Each switch draws that ring on the classified map.</p>
     <label class="switch-row">250 m around the buildings
       <span class="switch-wrap"><input id="show-a" type="checkbox"><span class="switch"></span></span>
     </label>
@@ -46,7 +63,7 @@
       <span class="switch-wrap"><input id="show-c" type="checkbox"><span class="switch"></span></span>
     </label>
 
-    <h2>Scenario Simulation*</h2>
+    <h2>Placeholder forecast*</h2>
     <div class="sim-row">
       <span>Acreage Expansion <strong id="acre-label">75 acres</strong></span>
       <button id="forecast-acres" type="button">Forecast</button>
@@ -61,8 +78,9 @@
     <div id="forecast-panel">
       <p id="forecast-summary"></p>
       <div class="chart-box short"><canvas id="decay"></canvas></div>
-      <p class="fine">* Simulated distance decay. The regression model is not trained yet.</p>
+      <p class="fine">* Placeholder distance decay. The regression model is not trained yet, so acreage and power do not change the map.</p>
     </div>
+    <p class="fine sources">Landsat Collection 2 Level-2 surface temperature, Microsoft Planetary Computer, summers 2008–2026. Footprints from OpenStreetMap. Distances measured in UTM zone 11N. These are ground temperatures, not air temperature and not a measure of server power.</p>
   </aside>
 
   <aside id="pud" class="card">
@@ -72,6 +90,17 @@
         <div class="fine">Ground Context &amp; Metrics</div>
       </div>
     </div>
+    <p class="chart-title">Summer ground temperature (°C), named places</p>
+    <div class="chart-box bars"><canvas id="bars"></canvas></div>
+    <ul class="bar-key">
+      <li><i class="swatch" style="background:#4C78A8"></i>Microsoft Columbia — core within 250 m of the buildings</li>
+      <li><i class="swatch" style="background:#F58518"></i>Vantage Quincy — core within 250 m</li>
+      <li><i class="swatch" style="background:#E45756"></i>Sabey SDC — core within 250 m</li>
+      <li><i class="swatch" style="background:#54A24B"></i>H5 Data Centers — core within 250 m</li>
+      <li><i class="swatch" style="background:#1B9E77"></i>Irrigated cropland — watered fields 3–5 km away</li>
+      <li><i class="swatch" style="background:#8C6D46"></i>Dry rangeland — low-greenness ground in that same far ring</li>
+    </ul>
+    <p class="fine">Each bar is that summer’s mean surface temperature. The axis starts at 28°C so the gap between roofs and watered fields is readable. Cropland and rangeland are the average of the four campuses’ far rings.</p>
     <div class="pud-body">
       <div>
         <div class="fine">Mean °C above irrigated cropland</div>
@@ -102,6 +131,8 @@
       <div><strong id="late-gap">—</strong><span>above fields, 2024–26</span></div>
       <div class="up"><strong id="change-gap">—</strong><span>that gap grew by</span></div>
     </div>
+    <p class="chart-title">This campus core versus its own far-field baselines, °C</p>
+    <div class="chart-box bars"><canvas id="campus-bars"></canvas></div>
     <p class="chart-title">Each summer, core minus irrigated cropland</p>
     <div class="chart-box"><canvas id="history"></canvas></div>
 
@@ -132,6 +163,6 @@
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="app.js?v=2008b"></script>
+  <script src="app.js?v=class"></script>
 </body>
 </html>

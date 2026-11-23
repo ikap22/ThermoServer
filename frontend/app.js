@@ -14,10 +14,28 @@ const forecastPanel = document.getElementById("forecast-panel");
 
 let metrics = null;
 let heatBounds = null;
+let spatial = null;
 const heatYear = {};
 let selectedId = null;
 let historyChart = null;
 let decayChart = null;
+let groupedChart = null;
+let campusBarChart = null;
+
+const BAR_YEARS = [2016, 2020, 2024];
+const BAR_ORDER = ["msft-columbia", "vantage-quincy", "sabey-sdc", "h5-quincy"];
+const BAR_LABEL = {
+  "msft-columbia": "Microsoft",
+  "vantage-quincy": "Vantage",
+  "sabey-sdc": "Sabey",
+  "h5-quincy": "H5",
+};
+const BAR_COLOR = {
+  "msft-columbia": "#4C78A8",
+  "vantage-quincy": "#F58518",
+  "sabey-sdc": "#E45756",
+  "h5-quincy": "#54A24B",
+};
 let campusesCache = null;
 const markers = {};
 
@@ -108,6 +126,34 @@ function drawSpark(values) {
   svg.innerHTML = `<polyline points="${points}" fill="none" stroke="#fb923c" stroke-width="2" />`;
 }
 
+function yearValue(facilityId, key, year) {
+  const years = metrics.years;
+  const values = facilityId
+    ? metrics.facilities[facilityId].series[key]
+    : BAR_ORDER.map((id) => metrics.facilities[id].series[key][years.indexOf(year)]);
+  if (!facilityId) return values.reduce((sum, value) => sum + value, 0) / values.length;
+  return values[years.indexOf(year)];
+}
+
+function barOptions(showLegend = true) {
+  return {
+    color: "#cbd5e1",
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: showLegend, position: "bottom", labels: { boxWidth: 10, color: "#cbd5e1", font: { size: 10 } } } },
+    scales: {
+      x: { ticks: { color: "#94a3b8" }, grid: { display: false } },
+      y: {
+        min: 28,
+        max: 54,
+        ticks: { color: "#94a3b8" },
+        grid: { color: "rgba(255,255,255,0.06)" },
+        title: { display: true, text: "Mean ground temperature (°C)", color: "#94a3b8" },
+      },
+    },
+  };
+}
+
 function chartTheme() {
   return {
     color: "#cbd5e1",
@@ -177,9 +223,15 @@ function openCampus(feature) {
     map.setFeatureState({ source: "campuses", id: item.properties.id }, { selected: on });
     markers[item.properties.id].classList.toggle("selected", on);
   });
+  campusBarChart.data.datasets[0].data = BAR_YEARS.map((year) => yearValue(props.id, "A_core", year));
+  campusBarChart.data.datasets[1].data = BAR_YEARS.map((year) => yearValue(props.id, "C2_cropland", year));
+  campusBarChart.data.datasets[2].data = BAR_YEARS.map((year) => yearValue(props.id, "C1_rangeland", year));
+  campusBarChart.update();
+
   drawer.classList.add("open");
   document.getElementById("pud").style.display = "none";
   historyChart.resize();
+  campusBarChart.resize();
   if (forecastPanel.classList.contains("open")) showForecast();
 }
 
@@ -196,6 +248,42 @@ function closeDrawer() {
 
 function makeCharts() {
   const theme = chartTheme();
+  groupedChart = new Chart(document.getElementById("bars"), {
+    type: "bar",
+    data: {
+      labels: BAR_YEARS.map(String),
+      datasets: [
+        ...BAR_ORDER.map((id) => ({
+          label: `${SHORT_NAME[id]} core`,
+          data: BAR_YEARS.map((year) => yearValue(id, "A_core", year)),
+          backgroundColor: BAR_COLOR[id],
+        })),
+        {
+          label: "Irrigated cropland, 3–5 km",
+          data: BAR_YEARS.map((year) => yearValue(null, "C2_cropland", year)),
+          backgroundColor: "#1B9E77",
+        },
+        {
+          label: "Dry rangeland, 3–5 km",
+          data: BAR_YEARS.map((year) => yearValue(null, "C1_rangeland", year)),
+          backgroundColor: "#8C6D46",
+        },
+      ],
+    },
+    options: barOptions(false),
+  });
+  campusBarChart = new Chart(document.getElementById("campus-bars"), {
+    type: "bar",
+    data: {
+      labels: BAR_YEARS.map(String),
+      datasets: [
+        { label: "Campus core, 0–250 m", data: [], backgroundColor: "#E4572E" },
+        { label: "Its irrigated cropland, 3–5 km", data: [], backgroundColor: "#1B9E77" },
+        { label: "Its dry rangeland, 3–5 km", data: [], backgroundColor: "#8C6D46" },
+      ],
+    },
+    options: barOptions(),
+  });
   historyChart = new Chart(document.getElementById("history"), {
     type: "line",
     data: {
@@ -235,20 +323,25 @@ function addMarkers(data) {
 }
 
 map.on("load", async () => {
-  const [facilityData, zoneData, metricData] = await Promise.all([
+  const [facilityData, zoneData, metricData, hotspotData] = await Promise.all([
     fetch("../data/geojson/facilities_quincy.geojson").then((response) => response.json()),
     fetch("../data/geojson/zones_quincy.geojson").then((response) => response.json()),
     fetch("metrics.json?v=2008").then((response) => response.json()),
+    fetch("spatial.json?v=class").then((response) => response.json()),
   ]);
   metrics = metricData;
+  spatial = hotspotData;
   campusesCache = facilityData;
   drawSpark(meanDivergence());
   fillRise();
+  makeCharts();
 
   heatBounds = await fetch("overlay_bounds.json?v=2008").then((response) => response.json());
   const startYear = Number(yearInput.value);
   addHeatLayer("field", startYear, "visible");
   ["a", "b", "c"].forEach((part) => addHeatLayer(part, startYear, "none"));
+  addHeatLayer("cluster", startYear, document.getElementById("show-cluster").checked ? "visible" : "none");
+  describeSpatial(startYear);
 
   map.addSource("zones", { type: "geojson", data: zoneData });
   [
@@ -299,7 +392,6 @@ map.on("load", async () => {
   map.on("click", "campuses-fill", (event) => openCampus(event.features[0]));
   map.on("mouseenter", "campuses-fill", () => { map.getCanvas().style.cursor = "pointer"; });
   map.on("mouseleave", "campuses-fill", () => { map.getCanvas().style.cursor = ""; });
-  makeCharts();
 });
 
 function gapSeries(id) {
@@ -345,7 +437,7 @@ const ZONE_PARTS = { a: "show-a", b: "show-b", c: "show-c" };
 
 function heatUrl(year, part) {
   const suffix = part === "field" ? "field" : part;
-  return `../data/overlays/clipped/quincy_${year}_${suffix}.png`;
+  return `../data/overlays/clipped/quincy_${year}_${suffix}.png?v=class`;
 }
 
 function addHeatLayer(part, year, visibility) {
@@ -379,10 +471,23 @@ function showHeat(part, year) {
   }
 }
 
+function describeSpatial(year) {
+  const row = spatial && spatial[String(year)];
+  const readout = document.getElementById("spatial-readout");
+  if (!row || !readout) return;
+  const probability = row.p_value <= 0.01 ? "p < 0.01" : `p = ${row.p_value.toFixed(2)}`;
+  readout.textContent =
+    `${year}: Moran’s I is ${row.morans_i.toFixed(2)} on ${row.block_m} m blocks of the valley floor (${probability}, 199 rearrangements). ` +
+    `Irrigated fields that summer averaged ${row.baseline_c}°C. ` +
+    `${row.hot_cluster_pct}% of the valley is a hot cluster: more than 12°C above the fields, with neighbors that hot. ` +
+    `${row.cool_cluster_pct}% is a cool cluster: at least 2°C cooler than the fields, with neighbors that cool.`;
+}
+
 function applyHeat() {
   const year = Number(yearInput.value);
   yearLabel.textContent = year;
   updatePills();
+  describeSpatial(year);
   if (!map.getSource("heat-field") || !heatBounds || !heatBounds[String(year)]) return;
   showHeat("field", year);
   Object.entries(ZONE_PARTS).forEach(([part, inputId]) => {
@@ -390,6 +495,19 @@ function applyHeat() {
     map.setLayoutProperty(`heat-${part}`, "visibility", on ? "visible" : "none");
     if (on) showHeat(part, year);
   });
+  const clustersOn = document.getElementById("show-cluster").checked;
+  if (map.getLayer("heat-cluster")) {
+    map.setLayoutProperty("heat-cluster", "visibility", clustersOn ? "visible" : "none");
+    if (clustersOn) showHeat("cluster", year);
+  }
+}
+
+const VANTAGE = [-119.8136, 47.2521];
+
+function jumpTo(year) {
+  yearInput.value = String(year);
+  applyHeat();
+  map.flyTo({ center: VANTAGE, zoom: 13.4, essential: true });
 }
 
 yearInput.addEventListener("input", applyHeat);
@@ -410,6 +528,9 @@ document.getElementById("show-c").addEventListener("change", (event) => {
   setZone("zone-c", event.target.checked);
   applyHeat();
 });
+document.getElementById("show-cluster").addEventListener("change", applyHeat);
+document.getElementById("jump-2008").addEventListener("click", () => jumpTo(2008));
+document.getElementById("jump-2024").addEventListener("click", () => jumpTo(2024));
 
 acresInput.addEventListener("input", showForecast);
 mwInput.addEventListener("input", showForecast);

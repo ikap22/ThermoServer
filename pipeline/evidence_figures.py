@@ -291,6 +291,56 @@ def plot_before_after() -> None:
     print(f"  C1 pixels {int(rangeland.sum()):,}   C2 pixels {int(cropland.sum()):,}   mixed {int(mixed.sum()):,}")
 
 
+def write_hotspots() -> None:
+    """Mark pixels more than 1.5 SD above that year's valley-floor mean."""
+    from PIL import Image
+
+    facilities = gpd.read_file(FACILITIES)
+    zones = gpd.read_file(ZONES)
+    summary = {}
+    for year in range(2008, 2027):
+        with rasterio.open(RAW / f"lst_{year}.tif") as src:
+            lst = src.read(1).astype(np.float32)
+            transform, crs = src.transform, src.crs
+        height, width = lst.shape
+        rows, cols = np.indices(lst.shape)
+        xs, ys = rasterio.transform.xy(transform, rows, cols, offset="center")
+        _, lats = rasterio.warp.transform(crs, "EPSG:4326", np.ravel(xs), np.ravel(ys))
+        lat = np.reshape(lats, lst.shape)
+        valid = np.isfinite(lst)
+        reference = valid & (lat < VALLEY_NORTH)
+        ref = lst[reference]
+        mean = float(np.mean(ref))
+        std = float(np.std(ref, ddof=1))
+        hot_cut = mean + 1.5 * std
+        # Hills north of the valley are hotter than the campuses, so they stay off this screen.
+        hot = valid & (lst > hot_cut) & (lat < VALLEY_NORTH)
+        rgba = np.zeros((height, width, 4), dtype=np.uint8)
+        rgba[hot] = (178, 24, 43, 230)
+        Image.fromarray(rgba, mode="RGBA").save(OVERLAYS / "clipped" / f"quincy_{year}_hot.png")
+
+        projected = zones.to_crs(crs)
+        core = unary_union(projected.loc[projected["zone_type"] == "A_core", "geometry"])
+        control = unary_union(projected.loc[projected["zone_type"] == "C_control", "geometry"])
+        core_mask = ~geometry_mask([core], out_shape=lst.shape, transform=transform) & valid
+        control_mask = ~geometry_mask([control], out_shape=lst.shape, transform=transform) & valid
+        summary[str(year)] = {
+            "mean_c": round(mean, 1),
+            "sd_c": round(std, 1),
+            "hot_above_c": round(hot_cut, 1),
+            "core_hot_pct": round(float(hot[core_mask].mean()) * 100, 1),
+            "control_hot_pct": round(float(hot[control_mask].mean()) * 100, 1),
+            "cuts_c": [round(mean + edge * std, 1) for edge in (-1.5, -0.5, 0.5, 1.5)],
+        }
+        print(
+            f"  {year}: mean {mean:.1f} SD {std:.1f} hot > {hot_cut:.1f} °C  "
+            f"core {summary[str(year)]['core_hot_pct']}%  control {summary[str(year)]['control_hot_pct']}%"
+        )
+    path = ROOT / "frontend" / "hotspots.json"
+    path.write_text(json.dumps(summary, indent=2))
+    print(f"Saved {path.relative_to(ROOT)}")
+
+
 def main() -> None:
     plot_bars_and_spectrum(load_metrics())
     plot_before_after()
