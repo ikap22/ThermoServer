@@ -15,6 +15,7 @@
   </header>
 
   <div id="map"></div>
+  <button id="charts-toggle" type="button">Charts</button>
 
   <aside id="controls" class="card">
     <h1>ThermoServer</h1>
@@ -89,6 +90,7 @@
         <strong>Quincy, WA</strong>
         <div class="fine">Ground Context &amp; Metrics</div>
       </div>
+      <button id="close-charts" type="button">Close</button>
     </div>
     <p class="chart-title">Summer ground temperature (°C), named places</p>
     <div class="chart-box bars"><canvas id="bars"></canvas></div>
@@ -163,6 +165,6 @@
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="app.js?v=class"></script>
+  <script src="app.js?v=vercel"></script>
 </body>
 </html>

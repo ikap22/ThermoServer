@@ -5,3 +5,4 @@ __pycache__/
 .mplconfig/
 data/raw/
 data/*.db
+site/

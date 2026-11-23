@@ -5,6 +5,13 @@ const SHORT_NAME = {
   "h5-quincy": "H5 Data Centers",
 };
 
+// Locally the page is served from /frontend/, so maps live one folder up.
+// On Vercel the page is the site root and those same files sit beside it.
+function asset(path) {
+  const prefix = window.location.pathname.includes("/frontend/") ? ".." : ".";
+  return `${prefix}/${path}`;
+}
+
 const yearInput = document.getElementById("year");
 const yearLabel = document.getElementById("year-label");
 const drawer = document.getElementById("drawer");
@@ -229,7 +236,8 @@ function openCampus(feature) {
   campusBarChart.update();
 
   drawer.classList.add("open");
-  document.getElementById("pud").style.display = "none";
+  document.getElementById("pud").classList.remove("open");
+  document.getElementById("charts-toggle").hidden = true;
   historyChart.resize();
   campusBarChart.resize();
   if (forecastPanel.classList.contains("open")) showForecast();
@@ -237,7 +245,7 @@ function openCampus(feature) {
 
 function closeDrawer() {
   drawer.classList.remove("open");
-  document.getElementById("pud").style.display = "";
+  document.getElementById("charts-toggle").hidden = false;
   if (selectedId && markers[selectedId]) markers[selectedId].classList.remove("selected");
   if (selectedId) map.setFeatureState({ source: "campuses", id: selectedId }, { selected: false });
   selectedId = null;
@@ -324,8 +332,8 @@ function addMarkers(data) {
 
 map.on("load", async () => {
   const [facilityData, zoneData, metricData, hotspotData] = await Promise.all([
-    fetch("../data/geojson/facilities_quincy.geojson").then((response) => response.json()),
-    fetch("../data/geojson/zones_quincy.geojson").then((response) => response.json()),
+    fetch(asset("data/geojson/facilities_quincy.geojson")).then((response) => response.json()),
+    fetch(asset("data/geojson/zones_quincy.geojson")).then((response) => response.json()),
     fetch("metrics.json?v=2008").then((response) => response.json()),
     fetch("spatial.json?v=class").then((response) => response.json()),
   ]);
@@ -437,7 +445,7 @@ const ZONE_PARTS = { a: "show-a", b: "show-b", c: "show-c" };
 
 function heatUrl(year, part) {
   const suffix = part === "field" ? "field" : part;
-  return `../data/overlays/clipped/quincy_${year}_${suffix}.png?v=class`;
+  return asset(`data/overlays/clipped/quincy_${year}_${suffix}.png?v=class`);
 }
 
 function addHeatLayer(part, year, visibility) {
@@ -537,3 +545,14 @@ mwInput.addEventListener("input", showForecast);
 document.getElementById("forecast-acres").addEventListener("click", showForecast);
 document.getElementById("forecast-mw").addEventListener("click", showForecast);
 document.getElementById("close").addEventListener("click", closeDrawer);
+
+function setCharts(open) {
+  document.getElementById("pud").classList.toggle("open", open);
+  document.getElementById("charts-toggle").hidden = open;
+  if (open) {
+    drawer.classList.remove("open");
+    if (groupedChart) groupedChart.resize();
+  }
+}
+document.getElementById("charts-toggle").addEventListener("click", () => setCharts(true));
+document.getElementById("close-charts").addEventListener("click", () => setCharts(false));

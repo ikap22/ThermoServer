@@ -1,0 +1,11 @@
+venv
+__pycache__
+.mplconfig
+data/raw
+pipeline
+backend
+ml
+requirements.txt
+*.tif
+*.pyc
+.mplconfig
